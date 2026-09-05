@@ -25,7 +25,7 @@ Invite-koden pekar på en tillfällig signaling-post som raderas efter 15 minute
 
 Media går peer-to-peer med WebRTC. STUN används för att upptäcka en direkt nätväg, men ingen ljud- eller videodata skickas via en applikationsserver. I nätverk med strikt NAT/brandvägg kan en TURN-reläserver behövas för att anslutningen ska fungera.
 
-Ljudtröskeln styrs från `Parent` och skickas över en krypterad data channel till `Child`. På child-enheten stängs mikrofonspåret av tills ljudnivån passerar tröskeln.
+Ljudtröskeln styrs från `Parent` och skickas över en krypterad data channel till `Child`. Den är avstängd som standard för att tvåvägsljud ska fungera direkt. När den aktiveras stängs mikrofonspåret av på child-enheten tills ljudnivån passerar tröskeln.
 
 ## Cloudflare Pages
 

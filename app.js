@@ -1,13 +1,13 @@
 /*
- * Närvaro is intentionally serverless for media. The two short-lived SDP
- * A short-lived Cloudflare Pages Function exchanges the SDP handshake. The
- * audio/video stream itself travels directly between the two WebRTC peers.
+ * Närvaro is intentionally serverless for media. A short-lived Cloudflare
+ * Pages Function exchanges the SDP handshake; audio and video travel directly
+ * between the two WebRTC peers.
  */
 const state = {
   role: 'parent',
   mode: 'monitor',
   video: false,
-  thresholdEnabled: true,
+  thresholdEnabled: false,
   threshold: 58,
   peer: null,
   channel: null,
@@ -331,7 +331,15 @@ function mediaErrorMessage(error) {
 }
 
 async function attachLocalTracks(peer, stream, includeVideoSlot = false) {
-  stream.getAudioTracks().forEach((track) => peer.addTrack(track, stream));
+  let audioTransceiver = peer.getTransceivers().find((transceiver) => transceiver.receiver.track.kind === 'audio');
+  const audioTrack = stream.getAudioTracks()[0];
+  if (audioTrack && audioTransceiver) {
+    await audioTransceiver.sender.replaceTrack(audioTrack);
+    if (audioTransceiver.direction !== 'sendrecv') audioTransceiver.direction = 'sendrecv';
+  } else if (audioTrack) {
+    peer.addTrack(audioTrack, stream);
+  }
+
   let videoTransceiver = peer.getTransceivers().find((transceiver) => transceiver.receiver.track.kind === 'video');
   if (includeVideoSlot && !videoTransceiver) {
     // Always negotiate a video slot in the offer. This lets the answerer send
@@ -341,6 +349,7 @@ async function attachLocalTracks(peer, stream, includeVideoSlot = false) {
   const videoTrack = stream.getVideoTracks()[0];
   if (videoTrack && videoTransceiver) {
     await videoTransceiver.sender.replaceTrack(videoTrack);
+    if (videoTransceiver.direction !== 'sendrecv') videoTransceiver.direction = 'sendrecv';
   } else if (videoTrack) {
     peer.addTrack(videoTrack, stream);
   }
@@ -358,6 +367,7 @@ async function ensureLocalMedia() {
     video: state.video ? { width: { ideal: 960 }, height: { ideal: 540 }, facingMode: 'user' } : false,
   });
   setupAnalyser();
+  if (state.audioContext?.state === 'suspended') state.audioContext.resume().catch(() => {});
   applyLocalAudioState();
   const videoTrack = state.localStream.getVideoTracks()[0];
   if (videoTrack) {
