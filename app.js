@@ -321,6 +321,37 @@ function updateSessionControls() {
   els.muteRemoteButton.setAttribute('aria-pressed', String(state.remoteMuted));
 }
 
+function getVideoTransceiver(peer = state.peer) {
+  return peer?.getTransceivers().find((transceiver) => transceiver.receiver?.track?.kind === 'video');
+}
+
+function showLocalVideo(track) {
+  if (!track || !state.localStream) return;
+  els.localVideo.srcObject = state.localStream;
+  els.localVideo.classList.remove('is-hidden');
+  els.previewPlaceholder.classList.add('is-hidden');
+  els.localVideo.play().catch(() => {});
+  track.addEventListener('ended', () => {
+    if (!state.localStream?.getVideoTracks().includes(track)) return;
+    state.localStream.removeTrack(track);
+    state.video = false;
+    els.videoToggle.checked = false;
+    els.localVideo.srcObject = null;
+    els.localVideo.classList.add('is-hidden');
+    if (!els.remoteVideo.srcObject) els.previewPlaceholder.classList.remove('is-hidden');
+    const transceiver = getVideoTransceiver();
+    transceiver?.sender.replaceTrack(null).catch(() => {});
+    setMessage('Kameran stängdes av. Kontrollera kamerabehörigheten och försök igen.', 'error');
+    updateSessionControls();
+  }, { once: true });
+}
+
+function hideLocalVideo() {
+  els.localVideo.srcObject = null;
+  els.localVideo.classList.add('is-hidden');
+  if (!els.remoteVideo.srcObject) els.previewPlaceholder.classList.remove('is-hidden');
+}
+
 function mediaErrorMessage(error) {
   if (error?.name === 'NotAllowedError' || error?.name === 'PermissionDeniedError') {
     return 'Mikrofon/kamera nekades. Tillåt åtkomst för narvaro.londogard.com och försök igen.';
@@ -371,15 +402,7 @@ async function ensureLocalMedia() {
   applyLocalAudioState();
   const videoTrack = state.localStream.getVideoTracks()[0];
   if (videoTrack) {
-    els.localVideo.srcObject = state.localStream;
-    els.localVideo.classList.remove('is-hidden');
-    els.previewPlaceholder.classList.add('is-hidden');
-    els.localVideo.play().catch(() => {});
-    videoTrack.addEventListener('ended', () => {
-      els.localVideo.classList.add('is-hidden');
-      if (!els.remoteVideo.srcObject) els.previewPlaceholder.classList.remove('is-hidden');
-      setMessage('Kameran stängdes av. Kontrollera kamerabehörigheten och försök igen.', 'error');
-    }, { once: true });
+    showLocalVideo(videoTrack);
   }
   updateSessionControls();
   return state.localStream;
@@ -498,10 +521,22 @@ function setupPeerEvents(peer) {
     const stream = event.streams[0] || new MediaStream([event.track]);
     if (event.track.kind === 'video') {
       els.remoteVideo.srcObject = stream;
+      els.remoteVideo.muted = true;
       els.remoteVideo.classList.remove('is-hidden');
       els.previewPlaceholder.classList.add('is-hidden');
       els.videoOverlay.classList.remove('is-hidden');
       els.remoteVideo.play().catch(() => {});
+      event.track.addEventListener('mute', () => {
+        els.remoteVideo.classList.add('is-hidden');
+        els.videoOverlay.classList.add('is-hidden');
+        if (!els.localVideo.srcObject) els.previewPlaceholder.classList.remove('is-hidden');
+      });
+      event.track.addEventListener('unmute', () => {
+        els.remoteVideo.classList.remove('is-hidden');
+        els.previewPlaceholder.classList.add('is-hidden');
+        els.videoOverlay.classList.remove('is-hidden');
+        els.remoteVideo.play().catch(() => {});
+      });
     } else {
       els.remoteAudio.srcObject = stream;
       els.remoteAudio.muted = state.remoteMuted;
@@ -527,6 +562,7 @@ function disconnectSession(showMessage = true) {
   els.remoteAudio.srcObject = null;
   els.remoteAudio.muted = false;
   els.remoteVideo.srcObject = null;
+  els.remoteVideo.muted = true;
   els.remoteVideo.classList.add('is-hidden');
   els.videoOverlay.classList.add('is-hidden');
   els.previewPlaceholder.classList.remove('is-hidden');
@@ -646,10 +682,50 @@ function changeMode(mode) {
   if (state.connected) sendControl({ type: 'hello', role: state.role, mode, video: state.video });
 }
 
-function changeVideo(enabled) {
+async function changeVideo(enabled) {
   if (state.connected) {
-    els.videoToggle.checked = Boolean(state.localStream?.getVideoTracks().length);
-    setMessage('Video ändras nästa gång du kopplar ihop enheterna.');
+    els.videoToggle.disabled = true;
+    try {
+      if (enabled) {
+        const transceiver = getVideoTransceiver();
+        if (!transceiver) {
+          throw new Error('Den här sessionen saknar en videokanal. Koppla från och skapa en ny invite.');
+        }
+        const cameraStream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: { width: { ideal: 960 }, height: { ideal: 540 }, facingMode: 'user' },
+        });
+        const videoTrack = cameraStream.getVideoTracks()[0];
+        try {
+          await transceiver.sender.replaceTrack(videoTrack);
+          if (transceiver.direction !== 'sendrecv') transceiver.direction = 'sendrecv';
+          if (state.localStream) state.localStream.addTrack(videoTrack);
+          else state.localStream = cameraStream;
+          state.video = true;
+          showLocalVideo(videoTrack);
+          setMessage('Kameran är aktiv och skickar video.', 'success');
+        } catch (error) {
+          videoTrack.stop();
+          throw error;
+        }
+      } else {
+        const transceiver = getVideoTransceiver();
+        if (transceiver) await transceiver.sender.replaceTrack(null);
+        state.localStream?.getVideoTracks().forEach((track) => {
+          state.localStream.removeTrack(track);
+          track.stop();
+        });
+        state.video = false;
+        hideLocalVideo();
+        setMessage('Video är avstängd. Ljudet fortsätter.', 'success');
+      }
+    } catch (error) {
+      els.videoToggle.checked = Boolean(state.localStream?.getVideoTracks().length);
+      setMessage(mediaErrorMessage(error), 'error');
+    } finally {
+      els.videoToggle.disabled = false;
+      updateSessionControls();
+    }
     return;
   }
   state.video = enabled;
