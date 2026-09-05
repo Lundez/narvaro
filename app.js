@@ -50,6 +50,7 @@ const els = {
   previewStatus: $('#preview-status'),
   previewStage: $('#preview-stage'),
   previewPlaceholder: $('#preview-placeholder'),
+  localVideo: $('#local-video'),
   remoteVideo: $('#remote-video'),
   remoteAudio: $('#remote-audio'),
   videoOverlay: $('#video-overlay'),
@@ -298,6 +299,8 @@ function releaseLocalMedia() {
   state.audioContext = null;
   state.localStream?.getTracks().forEach((track) => track.stop());
   state.localStream = null;
+  els.localVideo.srcObject = null;
+  els.localVideo.classList.add('is-hidden');
   updateSessionControls();
 }
 
@@ -356,6 +359,18 @@ async function ensureLocalMedia() {
   });
   setupAnalyser();
   applyLocalAudioState();
+  const videoTrack = state.localStream.getVideoTracks()[0];
+  if (videoTrack) {
+    els.localVideo.srcObject = state.localStream;
+    els.localVideo.classList.remove('is-hidden');
+    els.previewPlaceholder.classList.add('is-hidden');
+    els.localVideo.play().catch(() => {});
+    videoTrack.addEventListener('ended', () => {
+      els.localVideo.classList.add('is-hidden');
+      if (!els.remoteVideo.srcObject) els.previewPlaceholder.classList.remove('is-hidden');
+      setMessage('Kameran stängdes av. Kontrollera kamerabehörigheten och försök igen.', 'error');
+    }, { once: true });
+  }
   updateSessionControls();
   return state.localStream;
 }
@@ -622,14 +637,24 @@ function changeMode(mode) {
 }
 
 function changeVideo(enabled) {
-  state.video = enabled;
   if (state.connected) {
+    els.videoToggle.checked = Boolean(state.localStream?.getVideoTracks().length);
     setMessage('Video ändras nästa gång du kopplar ihop enheterna.');
     return;
   }
+  state.video = enabled;
   if (state.peer || state.localStream || state.roomCode) {
     disconnectSession(false);
-    setMessage('Videoläget är ändrat. Skapa en ny invite för att använda det.', 'success');
+  }
+  if (enabled) {
+    ensureLocalMedia()
+      .then(() => setMessage('Kameran är aktiv. Skapa en invite när du är redo.', 'success'))
+      .catch((error) => {
+        state.video = false;
+        els.videoToggle.checked = false;
+        releaseLocalMedia();
+        setMessage(mediaErrorMessage(error), 'error');
+      });
   }
 }
 

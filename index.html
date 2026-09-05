@@ -60,14 +60,6 @@
               </div>
             </div>
 
-            <label class="video-option">
-              <span class="video-option-copy">
-                <span class="video-icon">▣</span>
-                <span><strong>Video</strong><small>Välj före anslutning · skicka bild med ljud</small></span>
-              </span>
-              <input id="video-toggle" type="checkbox" />
-              <span class="switch" aria-hidden="true"></span>
-            </label>
           </article>
 
           <article class="card pairing-card">
@@ -143,8 +135,18 @@
         <aside class="right-column">
           <article class="card preview-card">
             <div class="preview-topline">
-              <span class="live-label"><span class="live-dot"></span><span id="connection-label">Inte ansluten</span></span>
-              <span class="privacy-mini">P2P</span>
+              <div class="preview-topline-copy">
+                <strong class="preview-heading">Din vy</strong>
+                <span class="live-label"><span class="live-dot"></span><span id="connection-label">Inte ansluten</span></span>
+              </div>
+              <div class="preview-topline-actions">
+                <label class="preview-video-option">
+                  <span><strong>Video</strong><small>Aktivera kamera</small></span>
+                  <input id="video-toggle" type="checkbox" />
+                  <span class="switch" aria-hidden="true"></span>
+                </label>
+                <span class="privacy-mini">P2P</span>
+              </div>
             </div>
             <div class="preview-stage" id="preview-stage">
               <div class="stage-glow"></div>
@@ -152,6 +154,7 @@
                 <div class="placeholder-orbit"><span class="orbit-dot"></span></div>
                 <p>Din vy visas här<br /><small>när ni är anslutna</small></p>
               </div>
+              <video id="local-video" class="local-video is-hidden" autoplay muted playsinline></video>
               <video id="remote-video" class="remote-video is-hidden" autoplay playsinline></video>
               <audio id="remote-audio" autoplay></audio>
               <div class="video-overlay is-hidden" id="video-overlay"><span>LIVE</span><b>Remote video</b></div>
