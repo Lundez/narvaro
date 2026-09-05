@@ -21,6 +21,8 @@ python3 -m http.server 4173
 
 Välj video på den enhet som ska skicka bild. Fjärrbilden visas som huvudbild i **Din vy**, medan den egna kameran visas som en liten märkt bild i hörnet. Kameran startar direkt så att den går att kontrollera innan anslutning. Båda enheterna behöver alltså inte slå på Video; handshaken reserverar videokanalen automatiskt. Video kan även slås av och på under en aktiv session utan att ljudet bryts. Under förhandsvisningen kan du när som helst muta din egen mikrofon, tysta mottagningsljudet eller avsluta sessionen.
 
+Parent kan be Child att aktivera kameran. Child godkänner detta en gång per session; därefter kan Parent slå av och på Child-kameran utan en ny appförfrågan. Child kan alltid avböja eller koppla från sessionen. Webbläsaren kan däremot fortfarande visa sin vanliga kamera-/mikrofonfråga första gången enheten använder respektive enhet.
+
 `Parent` och `Child` är aktiva roller, inte permanenta enhetstyper. Rollväljaren kan ändras under sessionen och påverkar bland annat ljudtröskelns kontroll. Batterinivån för motpartens enhet visas när webbläsaren tillåter batteri-API:t. Om webbläsaren bara returnerar API:ts standardvärden för okänd status visas **Batteri okänt** i stället för ett missvisande 100%-värde.
 
 Invite-koden pekar på en tillfällig signaling-post som raderas efter 15 minuter. Den innehåller bara WebRTC-handshaken; ljud och video transporteras fortfarande direkt mellan enheterna. Under **Avancerat** finns den tidigare manuella SDP-växlingen kvar som reserv.

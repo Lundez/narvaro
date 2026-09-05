@@ -24,6 +24,12 @@ const state = {
   localMuted: false,
   remoteMuted: false,
   remoteAudioNeedsUnlock: false,
+  localAudioActive: false,
+  remoteAudioActive: false,
+  lastAudioStateSent: null,
+  cameraRequestPending: false,
+  cameraControlGranted: false,
+  remoteVideoActive: false,
   battery: null,
   batteryTimer: null,
   batterySend: null,
@@ -42,6 +48,8 @@ const els = {
   inviteExpires: $('#invite-expires'),
   inviteQr: $('#invite-qr'),
   qrStatus: $('#qr-status'),
+  createOfferSpinner: $('#create-offer-spinner'),
+  createOfferLabel: $('#create-offer-label'),
   inviteLink: $('#invite-link'),
   shareInvite: $('#share-invite'),
   copyInviteLink: $('#copy-invite-link'),
@@ -65,6 +73,12 @@ const els = {
   remoteVideo: $('#remote-video'),
   remoteAudio: $('#remote-audio'),
   remoteBattery: $('#remote-battery'),
+  audioSignal: $('#audio-signal'),
+  audioSignalLabel: $('#audio-signal-label'),
+  requestRemoteVideoButton: $('#request-remote-video'),
+  cameraRequest: $('#camera-request'),
+  acceptCameraRequest: $('#accept-camera-request'),
+  declineCameraRequest: $('#decline-camera-request'),
   videoOverlay: $('#video-overlay'),
   muteLocalButton: $('#mute-local-button'),
   muteRemoteButton: $('#mute-remote-button'),
@@ -180,8 +194,12 @@ function renderInvite(code, expiresAt) {
         margin: 1,
         errorCorrectionLevel: 'M',
         color: { dark: '#173d35', light: '#ffffff' },
-      }, () => {
+      }, (error) => {
         if (renderToken !== state.qrRenderToken) return;
+        if (error) {
+          els.qrStatus.querySelector('span:last-child').textContent = 'QR-kod kunde inte skapas.';
+          return;
+        }
         els.qrStatus.classList.add('is-hidden');
         els.inviteQr.classList.remove('is-hidden');
       });
@@ -341,6 +359,18 @@ function applyLocalAudioState(level = getCurrentLevel()) {
   if (!track) return;
   const thresholdAllowsAudio = state.role !== 'child' || !state.thresholdEnabled || level >= state.threshold;
   track.enabled = !state.localMuted && thresholdAllowsAudio;
+  if (state.role === 'child') sendLocalAudioState();
+}
+
+function sendLocalAudioState() {
+  const track = state.localStream?.getAudioTracks()[0];
+  const active = Boolean(track?.enabled && !track.muted);
+  state.localAudioActive = active;
+  updateAudioSignal();
+  if (state.role === 'child' && state.channel?.readyState === 'open' && state.lastAudioStateSent !== active) {
+    state.lastAudioStateSent = active;
+    sendControl({ type: 'audio-state', active });
+  }
 }
 
 function primeAudioContext() {
@@ -354,15 +384,43 @@ function updateSessionControls() {
   els.muteLocalButton.disabled = !state.localStream;
   els.muteRemoteButton.disabled = !els.remoteAudio.srcObject;
   els.disconnectButton.disabled = !(state.peer || state.localStream || state.roomCode);
+  updateRemoteVideoRequestButton();
   els.muteLocalButton.textContent = state.localMuted ? 'Mikrofon av' : 'Muta mikrofon';
   els.muteLocalButton.setAttribute('aria-pressed', String(state.localMuted));
   els.muteRemoteButton.textContent = state.remoteMuted ? 'Sätt på ljud' : 'Tysta ljud';
   els.muteRemoteButton.setAttribute('aria-pressed', String(state.remoteMuted));
 }
 
+function updateRemoteVideoRequestButton() {
+  const button = els.requestRemoteVideoButton;
+  button.classList.toggle('is-hidden', state.role !== 'parent');
+  const parentReady = state.role === 'parent' && state.channel?.readyState === 'open' && state.peer;
+  button.disabled = !parentReady || state.cameraRequestPending;
+  if (!state.cameraControlGranted) {
+    button.textContent = state.cameraRequestPending ? 'Väntar på Child…' : 'Be om Child-video';
+    return;
+  }
+  button.textContent = state.remoteVideoActive ? 'Stäng av Child-video' : 'Sätt på Child-video';
+}
+
 function updateRoleUI() {
   const roleLabel = state.role === 'parent' ? 'Parent' : 'Child';
   els.activeRoleBadge.textContent = `${roleLabel} aktiv`;
+  updateAudioSignal();
+}
+
+function updateAudioSignal() {
+  const hasSession = Boolean(state.peer && state.localStream);
+  if (!hasSession) {
+    els.audioSignal.classList.add('is-hidden');
+    return;
+  }
+  const active = state.role === 'child' ? state.localAudioActive : state.remoteAudioActive;
+  els.audioSignal.classList.remove('is-hidden');
+  els.audioSignal.classList.toggle('is-active', active);
+  els.audioSignalLabel.textContent = state.role === 'child'
+    ? (active ? 'Du sänder ljud' : 'Ljud under tröskel')
+    : (active ? 'Child sänder ljud' : 'Child tyst just nu');
 }
 
 function updateRemoteBattery(message = state.remoteBattery) {
@@ -599,6 +657,9 @@ function sendRoleAndSettings() {
   sendControl({ type: 'hello', role: state.role, mode: state.mode, video: state.video });
   if (state.role === 'parent') {
     sendControl({ type: 'audio-policy', enabled: state.thresholdEnabled, threshold: state.threshold });
+  } else {
+    state.lastAudioStateSent = null;
+    sendLocalAudioState();
   }
 }
 
@@ -634,6 +695,43 @@ function handleControlMessage(message) {
     updateThresholdUI();
     applyLocalAudioState();
   }
+  if (message.type === 'audio-state' && state.role === 'parent') {
+    state.remoteAudioActive = Boolean(message.active);
+    updateAudioSignal();
+  }
+  if (message.type === 'camera-request' && state.role === 'child') {
+    if (state.cameraControlGranted) {
+      sendControl({ type: 'camera-grant-accepted' });
+      return;
+    }
+    state.cameraRequestPending = true;
+    els.cameraRequest.classList.remove('is-hidden');
+    setMessage('Parent vill aktivera din kamera. Godkänn om du vill fortsätta.', 'success');
+    updateSessionControls();
+  }
+  if (message.type === 'camera-grant-accepted' && state.role === 'parent') {
+    state.cameraControlGranted = true;
+    state.cameraRequestPending = false;
+    updateRemoteVideoRequestButton();
+    setMessage('Child har godkänt kamerastyrning för den här sessionen.', 'success');
+  }
+  if (message.type === 'camera-grant-declined' && state.role === 'parent') {
+    state.cameraControlGranted = false;
+    state.cameraRequestPending = false;
+    updateRemoteVideoRequestButton();
+    setMessage('Child vill inte aktivera kameran just nu.', 'error');
+  }
+  if (message.type === 'camera-command' && state.role === 'child' && state.cameraControlGranted) {
+    const enabled = Boolean(message.enabled);
+    void changeVideo(enabled).then(() => {
+      sendControl({ type: 'camera-state', enabled: state.video });
+    });
+  }
+  if (message.type === 'camera-state' && state.role === 'parent') {
+    state.remoteVideoActive = Boolean(message.enabled);
+    state.cameraRequestPending = false;
+    updateRemoteVideoRequestButton();
+  }
   if (message.type === 'battery') updateRemoteBattery(message);
 }
 
@@ -667,6 +765,7 @@ function setupPeerEvents(peer) {
   peer.addEventListener('track', (event) => {
     const stream = event.streams[0] || new MediaStream([event.track]);
     if (event.track.kind === 'video') {
+      state.remoteVideoActive = true;
       els.remoteVideo.srcObject = stream;
       els.remoteVideo.muted = true;
       els.remoteVideo.classList.remove('is-hidden');
@@ -674,16 +773,27 @@ function setupPeerEvents(peer) {
       els.videoOverlay.classList.remove('is-hidden');
       els.remoteVideo.play().catch(() => {});
       event.track.addEventListener('mute', () => {
+        state.remoteVideoActive = false;
         els.remoteVideo.classList.add('is-hidden');
         els.videoOverlay.classList.add('is-hidden');
         updatePreviewPlaceholder();
+        updateRemoteVideoRequestButton();
       });
       event.track.addEventListener('unmute', () => {
+        state.remoteVideoActive = true;
         els.remoteVideo.classList.remove('is-hidden');
         updatePreviewPlaceholder();
         els.videoOverlay.classList.remove('is-hidden');
         els.remoteVideo.play().catch(() => {});
+        updateRemoteVideoRequestButton();
       });
+      event.track.addEventListener('ended', () => {
+        state.remoteVideoActive = false;
+        els.remoteVideo.classList.add('is-hidden');
+        els.videoOverlay.classList.add('is-hidden');
+        updatePreviewPlaceholder();
+        updateRemoteVideoRequestButton();
+      }, { once: true });
     } else {
       els.remoteAudio.srcObject = stream;
       els.remoteAudio.muted = state.remoteMuted;
@@ -705,6 +815,12 @@ function disconnectSession(showMessage = true) {
   state.localMuted = false;
   state.remoteMuted = false;
   state.remoteAudioNeedsUnlock = false;
+  state.localAudioActive = false;
+  state.remoteAudioActive = false;
+  state.lastAudioStateSent = null;
+  state.cameraRequestPending = false;
+  state.cameraControlGranted = false;
+  state.remoteVideoActive = false;
   stopBatteryMonitoring();
   updateRemoteBattery(null);
   releaseLocalMedia();
@@ -715,6 +831,7 @@ function disconnectSession(showMessage = true) {
   els.remoteVideo.classList.add('is-hidden');
   els.videoOverlay.classList.add('is-hidden');
   els.localVideoLabel.classList.add('is-hidden');
+  els.cameraRequest.classList.add('is-hidden');
   els.previewPlaceholder.classList.remove('is-hidden');
   els.inviteOutput.classList.add('is-hidden');
   els.remoteName.textContent = 'Väntar på en vän';
@@ -739,10 +856,71 @@ function toggleRemoteMute() {
   setMessage(state.remoteMuted ? 'Mottagningsljudet är tystat.' : 'Mottagningsljudet är på igen.', 'success');
 }
 
+function setCreateOfferBusy(busy) {
+  els.createOffer.disabled = busy;
+  els.createOfferSpinner.classList.toggle('is-hidden', !busy);
+  els.createOfferLabel.textContent = busy ? 'Skapar invite…' : (state.offerReady ? 'Ny inbjudan' : 'Skapa inbjudan');
+  els.createOffer.setAttribute('aria-busy', String(busy));
+}
+
+function requestRemoteVideo() {
+  if (state.role !== 'parent' || state.channel?.readyState !== 'open' || !state.peer) return;
+  if (state.cameraControlGranted) {
+    const enabled = !state.remoteVideoActive;
+    state.cameraRequestPending = true;
+    sendControl({ type: 'camera-command', enabled });
+    setMessage(enabled ? 'Ber Child-enheten slå på kameran…' : 'Ber Child-enheten stänga av kameran…');
+    updateRemoteVideoRequestButton();
+    return;
+  }
+  state.cameraRequestPending = true;
+  sendControl({ type: 'camera-request' });
+  setMessage('Förfrågan skickad. Child behöver godkänna kamerastyrning…');
+  updateRemoteVideoRequestButton();
+}
+
+async function acceptCameraRequest() {
+  if (state.role !== 'child' || !state.peer || !state.cameraRequestPending) return;
+  els.acceptCameraRequest.disabled = true;
+  els.declineCameraRequest.disabled = true;
+  state.cameraRequestPending = false;
+  els.cameraRequest.classList.add('is-hidden');
+  state.cameraControlGranted = true;
+  const existingVideoTrack = state.localStream?.getVideoTracks()[0];
+  if (existingVideoTrack) {
+    state.video = true;
+    els.videoToggle.checked = true;
+    showLocalVideo(existingVideoTrack);
+  } else {
+    await changeVideo(true);
+  }
+  if (state.localStream?.getVideoTracks().length) {
+    sendControl({ type: 'camera-grant-accepted' });
+    setMessage('Kamerastyrning godkänd. Parent kan nu slå av och på Child-video under sessionen.', 'success');
+  } else {
+    state.cameraControlGranted = false;
+    sendControl({ type: 'camera-grant-declined', reason: 'camera-failed' });
+    setMessage('Kameran kunde inte startas. Kontrollera behörigheten och försök igen.', 'error');
+  }
+  els.acceptCameraRequest.disabled = false;
+  els.declineCameraRequest.disabled = false;
+  updateSessionControls();
+}
+
+function declineCameraRequest() {
+  if (state.role !== 'child' || !state.cameraRequestPending) return;
+  state.cameraRequestPending = false;
+  state.cameraControlGranted = false;
+  els.cameraRequest.classList.add('is-hidden');
+  sendControl({ type: 'camera-grant-declined' });
+  setMessage('Kameraförfrågan avböjd.', 'success');
+  updateSessionControls();
+}
+
 async function createOffer() {
   try {
     primeAudioContext();
-    els.createOffer.disabled = true;
+    setCreateOfferBusy(true);
     if (state.peer || state.localStream || state.roomCode) disconnectSession(false);
     setMessage('Förbereder mikrofon och skapar en säker inbjudan…');
     const stream = await ensureLocalMedia();
@@ -757,7 +935,7 @@ async function createOffer() {
     els.offerCode.value = encodeSignal(state.peer.localDescription);
     els.offerOutput.classList.remove('is-hidden');
     state.offerReady = true;
-    els.createOffer.textContent = 'Ny inbjudan ↗';
+    setCreateOfferBusy(true);
     try {
       const room = await createRoom(state.peer.localDescription);
       renderInvite(room.code, room.expiresAt);
@@ -771,7 +949,7 @@ async function createOffer() {
   } catch (error) {
     setMessage(mediaErrorMessage(error), 'error');
   } finally {
-    els.createOffer.disabled = false;
+    setCreateOfferBusy(false);
   }
 }
 
@@ -823,6 +1001,7 @@ async function processIncomingCode() {
 
 function changeRole(role) {
   state.role = role;
+  state.lastAudioStateSent = null;
   $$('.segment').forEach((button) => button.classList.toggle('is-active', button.dataset.role === role));
   updateThresholdUI();
   updateRoleUI();
@@ -861,6 +1040,7 @@ async function changeVideo(enabled) {
           if (state.localStream) state.localStream.addTrack(videoTrack);
           else state.localStream = cameraStream;
           state.video = true;
+          els.videoToggle.checked = true;
           showLocalVideo(videoTrack);
           setMessage('Kameran är aktiv och skickar video.', 'success');
         } catch (error) {
@@ -875,6 +1055,7 @@ async function changeVideo(enabled) {
           track.stop();
         });
         state.video = false;
+        els.videoToggle.checked = false;
         hideLocalVideo();
         setMessage('Video är avstängd. Ljudet fortsätter.', 'success');
       }
@@ -928,6 +1109,9 @@ els.inviteInput.addEventListener('keydown', (event) => {
   if (event.key === 'Enter') joinRoom();
 });
 els.videoToggle.addEventListener('change', (event) => changeVideo(event.target.checked));
+els.requestRemoteVideoButton.addEventListener('click', requestRemoteVideo);
+els.acceptCameraRequest.addEventListener('click', acceptCameraRequest);
+els.declineCameraRequest.addEventListener('click', declineCameraRequest);
 document.addEventListener('pointerdown', unlockAudioFromGesture, { passive: true });
 els.thresholdToggle.addEventListener('change', (event) => {
   state.thresholdEnabled = event.target.checked;

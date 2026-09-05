@@ -79,7 +79,7 @@
                 <div class="step-content">
                   <strong>Skapa en inbjudan</strong>
                   <p>Gör detta på enhet A. Media går fortfarande direkt mellan enheterna.</p>
-                  <button id="create-offer" class="button button-primary" type="button">Skapa inbjudan <span>↗</span></button>
+                  <button id="create-offer" class="button button-primary" type="button"><span id="create-offer-label">Skapa inbjudan</span><span id="create-offer-spinner" class="button-spinner is-hidden" aria-hidden="true"></span><span>↗</span></button>
                   <div id="invite-output" class="invite-output is-hidden">
                     <p class="invite-label">Din fyrords-kod</p>
                     <div id="invite-words" class="invite-words" aria-live="polite">—</div>
@@ -153,6 +153,10 @@
             </div>
             <div class="preview-stage" id="preview-stage">
               <div class="stage-glow"></div>
+              <div id="camera-request" class="camera-request is-hidden" role="alert">
+                <div><strong>Parent vill visa din kamera</strong><p>Godkänn för att börja skicka video.</p></div>
+                <div class="camera-request-actions"><button id="accept-camera-request" class="button button-primary" type="button">Tillåt kamera</button><button id="decline-camera-request" class="camera-request-decline" type="button">Inte nu</button></div>
+              </div>
               <div class="preview-placeholder" id="preview-placeholder">
                 <div class="placeholder-orbit"><span class="orbit-dot"></span></div>
                 <p>Fjärrbild visas här<br /><small>Din kamera syns i hörnet</small></p>
@@ -169,12 +173,14 @@
                 <div class="preview-status-row">
                   <p class="preview-status" id="preview-status">Koppla ihop två enheter för att börja</p>
                   <span id="remote-battery" class="battery-status" aria-live="polite">Batteri —</span>
+                  <span id="audio-signal" class="audio-signal is-hidden" aria-live="polite"><span class="audio-dot"></span><span id="audio-signal-label">Child sänder ljud</span></span>
                 </div>
               </div>
               <div class="preview-actions">
                 <button id="mute-local-button" class="session-button" type="button" aria-pressed="false" disabled>Muta mikrofon</button>
                 <button id="mute-remote-button" class="session-button" type="button" aria-pressed="false" disabled>Tysta ljud</button>
                 <button id="disconnect-button" class="session-button session-button-danger" type="button" disabled>Koppla från</button>
+                <button id="request-remote-video" class="session-button session-button-video" type="button" disabled>Be om Child-video</button>
                 <button id="fullscreen-button" class="icon-button" type="button" aria-label="Visa i helskärm">⛶</button>
               </div>
             </div>
@@ -220,6 +226,6 @@
     </main>
 
     <script src="vendor/qrcode.min.js"></script>
-    <script src="app.js?v=20260905-7"></script>
+    <script src="app.js?v=20260905-8"></script>
   </body>
 </html>
