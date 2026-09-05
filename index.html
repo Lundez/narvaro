@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="sv">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f4efe6" />
+    <meta name="description" content="En enkel P2P-brygga för ljud och video mellan två enheter." />
+    <title>närvaro — P2P monitor</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="grain" aria-hidden="true"></div>
+    <header class="topbar">
+      <a class="brand" href="#top" aria-label="Närvaro hem">
+        <span class="brand-mark"><span></span><span></span><span></span></span>
+        <span>närvaro</span>
+      </a>
+      <div class="privacy-pill"><span class="status-dot"></span>direkt mellan enheter</div>
+    </header>
+
+    <main id="top" class="shell">
+      <section class="intro">
+        <p class="eyebrow">P2P companion · v0.1</p>
+        <h1>En tryggare linje<br /><em>nära till hands.</em></h1>
+        <p class="intro-copy">
+          Koppla ihop två enheter direkt. Använd som walkie talkie eller låt ljudet vakta rummet som en baby monitor.
+        </p>
+      </section>
+
+      <section class="workspace-grid">
+        <div class="left-column">
+          <article class="card connection-card">
+            <div class="card-heading">
+              <div>
+                <p class="section-kicker">01 · Din enhet</p>
+                <h2>Ställ in din plats</h2>
+              </div>
+              <span class="step-badge">A</span>
+            </div>
+
+            <div class="segmented role-switch" role="group" aria-label="Välj enhetsroll">
+              <button class="segment is-active" data-role="parent" type="button">
+                <span class="segment-icon">⌂</span>
+                <span><strong>Parent</strong><small>Jag lyssnar</small></span>
+              </button>
+              <button class="segment" data-role="child" type="button">
+                <span class="segment-icon">◌</span>
+                <span><strong>Child</strong><small>Jag är nära</small></span>
+              </button>
+            </div>
+
+            <div class="mode-row">
+              <div>
+                <p class="field-label">Läge</p>
+                <p class="field-help">Byt läge när som helst</p>
+              </div>
+              <div class="mode-toggle" role="group" aria-label="Välj läge">
+                <button class="mode-button is-active" data-mode="monitor" type="button">Baby monitor</button>
+                <button class="mode-button" data-mode="talkie" type="button">Walkie talkie</button>
+              </div>
+            </div>
+
+            <label class="video-option">
+              <span class="video-option-copy">
+                <span class="video-icon">▣</span>
+                <span><strong>Video</strong><small>Skicka bild tillsammans med ljud</small></span>
+              </span>
+              <input id="video-toggle" type="checkbox" />
+              <span class="switch" aria-hidden="true"></span>
+            </label>
+          </article>
+
+          <article class="card pairing-card">
+            <div class="card-heading">
+              <div>
+                <p class="section-kicker">02 · Koppla ihop</p>
+                <h2>Hitta varandra</h2>
+              </div>
+              <span class="step-badge">B</span>
+            </div>
+            <p class="card-lede">Ingen inloggning. Skapa en kod på ena enheten och klistra in den på den andra.</p>
+
+            <div class="pairing-steps">
+              <div class="pairing-step">
+                <div class="step-number">1</div>
+                <div class="step-content">
+                  <strong>Skapa en inbjudan</strong>
+                  <p>Gör detta på enhet A.</p>
+                  <button id="create-offer" class="button button-primary" type="button">Skapa inbjudan <span>↗</span></button>
+                  <div id="offer-output" class="code-area-wrap is-hidden">
+                    <label for="offer-code">Din inbjudningskod</label>
+                    <textarea id="offer-code" class="code-area" readonly spellcheck="false"></textarea>
+                    <button class="copy-button" data-copy-target="offer-code" type="button">Kopiera kod <span>⧉</span></button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="connector-line" aria-hidden="true"></div>
+
+              <div class="pairing-step">
+                <div class="step-number">2</div>
+                <div class="step-content">
+                  <strong>Acceptera eller slutför</strong>
+                  <p id="answer-step-copy">Klistra in inbjudan på enhet B.</p>
+                  <textarea id="incoming-code" class="code-area" placeholder="Klistra in kod här…" spellcheck="false"></textarea>
+                  <button id="process-code" class="button button-secondary" type="button">Acceptera kod <span>→</span></button>
+                  <div id="answer-output" class="code-area-wrap is-hidden">
+                    <label for="answer-code">Svarskod · tillbaka till enhet A</label>
+                    <textarea id="answer-code" class="code-area" readonly spellcheck="false"></textarea>
+                    <button class="copy-button" data-copy-target="answer-code" type="button">Kopiera svar <span>⧉</span></button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div id="connection-message" class="inline-message" role="status" aria-live="polite"></div>
+          </article>
+        </div>
+
+        <aside class="right-column">
+          <article class="card preview-card">
+            <div class="preview-topline">
+              <span class="live-label"><span class="live-dot"></span><span id="connection-label">Inte ansluten</span></span>
+              <span class="privacy-mini">P2P</span>
+            </div>
+            <div class="preview-stage" id="preview-stage">
+              <div class="stage-glow"></div>
+              <div class="preview-placeholder" id="preview-placeholder">
+                <div class="placeholder-orbit"><span class="orbit-dot"></span></div>
+                <p>Din vy visas här<br /><small>när ni är anslutna</small></p>
+              </div>
+              <video id="remote-video" class="remote-video is-hidden" autoplay playsinline></video>
+              <audio id="remote-audio" autoplay></audio>
+              <div class="video-overlay is-hidden" id="video-overlay"><span>LIVE</span><b>Remote video</b></div>
+            </div>
+            <div class="preview-footer">
+              <div>
+                <p class="preview-name" id="remote-name">Väntar på en vän</p>
+                <p class="preview-status" id="preview-status">Koppla ihop två enheter för att börja</p>
+              </div>
+              <button id="fullscreen-button" class="icon-button" type="button" aria-label="Visa i helskärm">⛶</button>
+            </div>
+          </article>
+
+          <article class="card control-card" id="audio-control-card">
+            <div class="card-heading compact-heading">
+              <div>
+                <p class="section-kicker">03 · Ljudvakt</p>
+                <h2>Smart ljudfilter</h2>
+              </div>
+              <span class="sparkle">✦</span>
+            </div>
+            <p class="card-lede">Skicka bara ljud från child-enheten när rummet blir högljutt.</p>
+
+            <label class="filter-toggle">
+              <span><strong>Aktivera ljudtröskel</strong><small>Parent styr när mikrofonen öppnas</small></span>
+              <input id="threshold-toggle" type="checkbox" checked />
+              <span class="switch" aria-hidden="true"></span>
+            </label>
+
+            <div class="meter-wrap">
+              <div class="meter-labels"><span>Tyst</span><span>Tröskel</span><span>Högt</span></div>
+              <div class="meter-track"><div id="level-fill" class="meter-level"></div><div id="threshold-marker" class="threshold-marker"></div></div>
+              <div class="meter-value-row"><span>Live-nivå</span><strong id="level-value">— dB</strong></div>
+            </div>
+
+            <label class="slider-label" for="threshold-slider"><span>Öppna vid</span><strong id="threshold-value">−38 dB</strong></label>
+            <input id="threshold-slider" class="threshold-slider" type="range" min="10" max="90" value="58" />
+            <p class="range-help">Lägre tröskel = känsligare mikrofon</p>
+
+            <div id="child-filter-note" class="filter-note is-hidden"><span>◌</span> Parent har ställt in ett ljudfilter på din enhet.</div>
+          </article>
+
+          <article class="card tip-card">
+            <div class="tip-icon">⌁</div>
+            <div><strong>Alltid privat</strong><p>Ljud och video går direkt mellan enheterna. Ingen inspelning eller molnlagring.</p></div>
+          </article>
+        </aside>
+      </section>
+
+      <footer class="footer-note"><span class="footer-mark">✦</span> Byggd för de små stunderna som betyder mest.</footer>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
