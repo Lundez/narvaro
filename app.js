@@ -377,10 +377,15 @@ async function attachLocalTracks(peer, stream, includeVideoSlot = false) {
     // video even when the offerer has its own camera turned off.
     videoTransceiver = peer.addTransceiver('video', { direction: 'sendrecv' });
   }
+  if (videoTransceiver && videoTransceiver.direction !== 'sendrecv') {
+    // Keep the answerer's video m-line bidirectional even when its camera
+    // starts off. replaceTrack() can then turn the camera on later without a
+    // second SDP negotiation.
+    videoTransceiver.direction = 'sendrecv';
+  }
   const videoTrack = stream.getVideoTracks()[0];
   if (videoTrack && videoTransceiver) {
     await videoTransceiver.sender.replaceTrack(videoTrack);
-    if (videoTransceiver.direction !== 'sendrecv') videoTransceiver.direction = 'sendrecv';
   } else if (videoTrack) {
     peer.addTrack(videoTrack, stream);
   }
