@@ -20,6 +20,8 @@ const state = {
   connected: false,
   roomCode: null,
   roomPollTimer: null,
+  localMuted: false,
+  remoteMuted: false,
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -51,6 +53,9 @@ const els = {
   remoteVideo: $('#remote-video'),
   remoteAudio: $('#remote-audio'),
   videoOverlay: $('#video-overlay'),
+  muteLocalButton: $('#mute-local-button'),
+  muteRemoteButton: $('#mute-remote-button'),
+  disconnectButton: $('#disconnect-button'),
   fullscreenButton: $('#fullscreen-button'),
   videoToggle: $('#video-toggle'),
   thresholdToggle: $('#threshold-toggle'),
@@ -233,7 +238,7 @@ async function joinRoom() {
     setMessage('Svar skickat. Försöker koppla ihop enheterna…', 'success');
     els.answerStepCopy.textContent = 'Svar skickat automatiskt. Väntar på direkt anslutning.';
   } catch (error) {
-    setMessage(error.message || 'Kunde inte ansluta med invite-koden.', 'error');
+    setMessage(mediaErrorMessage(error), 'error');
   } finally {
     els.joinInvite.disabled = false;
   }
@@ -267,7 +272,7 @@ async function copyInviteLink() {
   }
 }
 
-function waitForIceComplete(peer) {
+function waitForIceComplete(peer, timeout = 2500) {
   if (peer.iceGatheringState === 'complete') return Promise.resolve();
   return new Promise((resolve) => {
     const handleChange = () => {
@@ -280,12 +285,52 @@ function waitForIceComplete(peer) {
     setTimeout(() => {
       peer.removeEventListener('icegatheringstatechange', handleChange);
       resolve();
-    }, 8000);
+    }, timeout);
   });
 }
 
+function releaseLocalMedia() {
+  if (state.levelTimer) window.clearInterval(state.levelTimer);
+  state.levelTimer = null;
+  state.analyser = null;
+  state.levelData = null;
+  if (state.audioContext) state.audioContext.close().catch(() => {});
+  state.audioContext = null;
+  state.localStream?.getTracks().forEach((track) => track.stop());
+  state.localStream = null;
+  updateSessionControls();
+}
+
+function applyLocalAudioState(level = getCurrentLevel()) {
+  const track = state.localStream?.getAudioTracks()[0];
+  if (!track) return;
+  const thresholdAllowsAudio = state.role !== 'child' || !state.thresholdEnabled || level >= state.threshold;
+  track.enabled = !state.localMuted && thresholdAllowsAudio;
+}
+
+function updateSessionControls() {
+  els.muteLocalButton.disabled = !state.localStream;
+  els.muteRemoteButton.disabled = !els.remoteAudio.srcObject;
+  els.disconnectButton.disabled = !(state.peer || state.localStream || state.roomCode);
+  els.muteLocalButton.textContent = state.localMuted ? 'Mikrofon av' : 'Muta mikrofon';
+  els.muteLocalButton.setAttribute('aria-pressed', String(state.localMuted));
+  els.muteRemoteButton.textContent = state.remoteMuted ? 'Sätt på ljud' : 'Tysta ljud';
+  els.muteRemoteButton.setAttribute('aria-pressed', String(state.remoteMuted));
+}
+
+function mediaErrorMessage(error) {
+  if (error?.name === 'NotAllowedError' || error?.name === 'PermissionDeniedError') {
+    return 'Mikrofon/kamera nekades. Tillåt åtkomst för narvaro.londogard.com och försök igen.';
+  }
+  if (error?.name === 'NotFoundError') return 'Ingen mikrofon eller kamera hittades på enheten.';
+  if (error?.name === 'NotReadableError') return 'Mikrofonen eller kameran används redan av en annan app.';
+  return error?.message || 'Kunde inte starta mikrofon eller kamera.';
+}
+
 async function ensureLocalMedia() {
-  if (state.localStream) return state.localStream;
+  const currentHasVideo = Boolean(state.localStream?.getVideoTracks().length);
+  if (state.localStream && currentHasVideo === state.video) return state.localStream;
+  if (state.localStream) releaseLocalMedia();
   if (!navigator.mediaDevices?.getUserMedia) {
     throw new Error('Den här webbläsaren kan inte använda mikrofon eller kamera.');
   }
@@ -294,6 +339,8 @@ async function ensureLocalMedia() {
     video: state.video ? { width: { ideal: 960 }, height: { ideal: 540 }, facingMode: 'user' } : false,
   });
   setupAnalyser();
+  applyLocalAudioState();
+  updateSessionControls();
   return state.localStream;
 }
 
@@ -333,9 +380,7 @@ function updateAudioMeter() {
   els.levelValue.textContent = state.localStream ? `${thresholdToDb(level)} dB` : '— dB';
   if (state.role === 'child' && state.localStream) {
     // With the policy off, the child mic should immediately return to open.
-    const shouldSend = !state.thresholdEnabled || level >= state.threshold;
-    const track = state.localStream.getAudioTracks()[0];
-    if (track && track.enabled !== shouldSend) track.enabled = shouldSend;
+    applyLocalAudioState(level);
   }
 }
 
@@ -400,31 +445,77 @@ function setupPeerEvents(peer) {
     if (connectionState === 'connected') {
       state.connected = true;
       setConnectionStatus('Ansluten', 'Ljudlinjen är öppen');
+      updateSessionControls();
     } else if (['failed', 'disconnected', 'closed'].includes(connectionState)) {
       state.connected = false;
       setConnectionStatus('Frånkopplad', 'Försök skapa en ny inbjudan');
       setMessage('Anslutningen bröts. Du kan prova igen.', 'error');
+      updateSessionControls();
     }
   });
   peer.addEventListener('track', (event) => {
-    const [stream] = event.streams;
-    if (!stream) return;
+    const stream = event.streams[0] || new MediaStream([event.track]);
     if (event.track.kind === 'video') {
       els.remoteVideo.srcObject = stream;
       els.remoteVideo.classList.remove('is-hidden');
       els.previewPlaceholder.classList.add('is-hidden');
       els.videoOverlay.classList.remove('is-hidden');
+      els.remoteVideo.play().catch(() => {});
     } else {
       els.remoteAudio.srcObject = stream;
+      els.remoteAudio.muted = state.remoteMuted;
       els.remoteAudio.play().catch(() => {});
       els.previewPlaceholder.classList.add('is-hidden');
     }
+    updateSessionControls();
   });
+}
+
+function disconnectSession(showMessage = true) {
+  window.clearInterval(state.roomPollTimer);
+  state.roomPollTimer = null;
+  state.peer?.close();
+  state.peer = null;
+  state.channel = null;
+  state.offerReady = false;
+  state.connected = false;
+  state.roomCode = null;
+  state.localMuted = false;
+  state.remoteMuted = false;
+  releaseLocalMedia();
+  els.remoteAudio.srcObject = null;
+  els.remoteAudio.muted = false;
+  els.remoteVideo.srcObject = null;
+  els.remoteVideo.classList.add('is-hidden');
+  els.videoOverlay.classList.add('is-hidden');
+  els.previewPlaceholder.classList.remove('is-hidden');
+  els.inviteOutput.classList.add('is-hidden');
+  els.remoteName.textContent = 'Väntar på en vän';
+  setConnectionStatus('Inte ansluten');
+  updateSessionControls();
+  if (showMessage) setMessage('Sessionen är avslutad. Du kan skapa en ny invite.', 'success');
+}
+
+function toggleLocalMute() {
+  if (!state.localStream) return;
+  state.localMuted = !state.localMuted;
+  applyLocalAudioState();
+  updateSessionControls();
+  setMessage(state.localMuted ? 'Din mikrofon är mutad.' : 'Din mikrofon är på igen.', 'success');
+}
+
+function toggleRemoteMute() {
+  if (!els.remoteAudio.srcObject) return;
+  state.remoteMuted = !state.remoteMuted;
+  els.remoteAudio.muted = state.remoteMuted;
+  updateSessionControls();
+  setMessage(state.remoteMuted ? 'Mottagningsljudet är tystat.' : 'Mottagningsljudet är på igen.', 'success');
 }
 
 async function createOffer() {
   try {
     els.createOffer.disabled = true;
+    if (state.peer || state.localStream || state.roomCode) disconnectSession(false);
     setMessage('Förbereder mikrofon och skapar en säker inbjudan…');
     const stream = await ensureLocalMedia();
     state.peer?.close();
@@ -450,7 +541,7 @@ async function createOffer() {
       setMessage(`Kort invite kunde inte skapas ännu: ${error.message} Använd den avancerade manuella koden tills Cloudflare är klar.`, 'error');
     }
   } catch (error) {
-    setMessage(error.message || 'Kunde inte skapa en inbjudan.', 'error');
+    setMessage(mediaErrorMessage(error), 'error');
   } finally {
     els.createOffer.disabled = false;
   }
@@ -495,7 +586,7 @@ async function processIncomingCode() {
       throw new Error('Koden känns inte igen. Skapa en ny kod och försök igen.');
     }
   } catch (error) {
-    setMessage(error.message || 'Kunde inte läsa koden.', 'error');
+    setMessage(mediaErrorMessage(error), 'error');
   } finally {
     els.processCode.disabled = false;
   }
@@ -516,15 +607,13 @@ function changeMode(mode) {
 
 function changeVideo(enabled) {
   state.video = enabled;
-  if (!enabled && state.localStream) {
-    const videoTrack = state.localStream.getVideoTracks()[0];
-    if (videoTrack) {
-      videoTrack.stop();
-      state.localStream.removeTrack(videoTrack);
-    }
-  }
   if (state.connected) {
     setMessage('Video ändras nästa gång du kopplar ihop enheterna.');
+    return;
+  }
+  if (state.peer || state.localStream || state.roomCode) {
+    disconnectSession(false);
+    setMessage('Videoläget är ändrat. Skapa en ny invite för att använda det.', 'success');
   }
 }
 
@@ -546,6 +635,9 @@ els.processCode.addEventListener('click', processIncomingCode);
 els.joinInvite.addEventListener('click', joinRoom);
 els.shareInvite.addEventListener('click', shareInvite);
 els.copyInviteLink.addEventListener('click', copyInviteLink);
+els.muteLocalButton.addEventListener('click', toggleLocalMute);
+els.muteRemoteButton.addEventListener('click', toggleRemoteMute);
+els.disconnectButton.addEventListener('click', () => disconnectSession(true));
 els.inviteInput.addEventListener('keydown', (event) => {
   if (event.key === 'Enter') joinRoom();
 });
@@ -575,3 +667,4 @@ if (inviteFromUrl && normalizeInviteCode(inviteFromUrl)) {
 
 updateThresholdUI();
 setConnectionStatus('Inte ansluten');
+updateSessionControls();

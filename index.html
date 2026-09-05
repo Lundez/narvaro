@@ -63,7 +63,7 @@
             <label class="video-option">
               <span class="video-option-copy">
                 <span class="video-icon">▣</span>
-                <span><strong>Video</strong><small>Skicka bild tillsammans med ljud</small></span>
+                <span><strong>Video</strong><small>Välj före invite · skicka bild med ljud</small></span>
               </span>
               <input id="video-toggle" type="checkbox" />
               <span class="switch" aria-hidden="true"></span>
@@ -161,7 +161,12 @@
                 <p class="preview-name" id="remote-name">Väntar på en vän</p>
                 <p class="preview-status" id="preview-status">Koppla ihop två enheter för att börja</p>
               </div>
-              <button id="fullscreen-button" class="icon-button" type="button" aria-label="Visa i helskärm">⛶</button>
+              <div class="preview-actions">
+                <button id="mute-local-button" class="session-button" type="button" aria-pressed="false" disabled>Muta mikrofon</button>
+                <button id="mute-remote-button" class="session-button" type="button" aria-pressed="false" disabled>Tysta ljud</button>
+                <button id="disconnect-button" class="session-button session-button-danger" type="button" disabled>Koppla från</button>
+                <button id="fullscreen-button" class="icon-button" type="button" aria-label="Visa i helskärm">⛶</button>
+              </div>
             </div>
           </article>
 

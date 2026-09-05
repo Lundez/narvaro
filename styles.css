@@ -189,9 +189,13 @@ input:checked + .switch::after { transform: translateX(19px); }
 .video-overlay { align-items: center; background: linear-gradient(90deg, rgba(10, 25, 23, .35), transparent); color: white; display: flex; gap: 9px; inset: 0 0 auto; padding: 18px 21px; position: absolute; z-index: 3; }
 .video-overlay span { background: var(--coral); font-family: 'DM Mono', monospace; font-size: 8px; padding: 4px 6px; }
 .video-overlay b { font-size: 10px; font-weight: 600; }
-.preview-footer { align-items: center; display: flex; justify-content: space-between; padding: 18px 21px 20px; }
+.preview-footer { align-items: center; display: flex; gap: 16px; justify-content: space-between; padding: 18px 21px 20px; }
 .preview-name { font-size: 13px; font-weight: 700; margin: 0 0 5px; }
 .preview-status { color: var(--muted); font-size: 10px; margin: 0; }
+.preview-actions { align-items: center; display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+.session-button { background: var(--paper-deep); border: 0; color: var(--green); font-size: 9px; font-weight: 700; padding: 9px 10px; white-space: nowrap; }
+.session-button:disabled { cursor: not-allowed; opacity: .45; }
+.session-button-danger { color: #ad5447; }
 .icon-button { background: var(--paper-deep); border: 0; color: var(--green); font-size: 19px; height: 34px; width: 34px; }
 
 .control-card { background: var(--green); color: var(--white); }
@@ -242,4 +246,6 @@ input:checked + .switch::after { transform: translateX(19px); }
   .segment { gap: 8px; padding: 12px 9px; }
   .segment small { font-size: 9px; }
   .mode-button { padding-left: 8px; padding-right: 8px; }
+  .preview-footer { align-items: flex-start; flex-direction: column; }
+  .preview-actions { justify-content: flex-start; width: 100%; }
 }
