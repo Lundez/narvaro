@@ -697,7 +697,9 @@ function changeMode(mode) {
 }
 
 async function changeVideo(enabled) {
-  if (state.connected) {
+  const peerState = state.peer?.connectionState;
+  const hasActivePeer = state.peer && !['closed', 'failed'].includes(peerState);
+  if (hasActivePeer) {
     els.videoToggle.disabled = true;
     try {
       if (enabled) {
