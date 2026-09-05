@@ -19,7 +19,7 @@ python3 -m http.server 4173
 3. Dela länken, visa QR-koden eller skicka de fyra orden till enhet B.
 4. På enhet B: öppna länken eller skriv in orden och tryck **Anslut med invite**.
 
-Välj video på den enhet som ska skicka bild. Kameran startar direkt och visas lokalt i **Din vy**, så det går att kontrollera den innan anslutning. Båda enheterna behöver alltså inte slå på Video; handshaken reserverar videokanalen automatiskt. Video kan även slås av och på under en aktiv session utan att ljudet bryts. Under förhandsvisningen kan du när som helst muta din egen mikrofon, tysta mottagningsljudet eller avsluta sessionen.
+Välj video på den enhet som ska skicka bild. Fjärrbilden visas som huvudbild i **Din vy**, medan den egna kameran visas som en liten märkt bild i hörnet. Kameran startar direkt så att den går att kontrollera innan anslutning. Båda enheterna behöver alltså inte slå på Video; handshaken reserverar videokanalen automatiskt. Video kan även slås av och på under en aktiv session utan att ljudet bryts. Under förhandsvisningen kan du när som helst muta din egen mikrofon, tysta mottagningsljudet eller avsluta sessionen.
 
 Invite-koden pekar på en tillfällig signaling-post som raderas efter 15 minuter. Den innehåller bara WebRTC-handshaken; ljud och video transporteras fortfarande direkt mellan enheterna. Under **Avancerat** finns den tidigare manuella SDP-växlingen kvar som reserv.
 

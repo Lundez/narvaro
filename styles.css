@@ -196,8 +196,9 @@ input:checked + .switch::after { transform: translateX(19px); }
 .orbit-dot { background: var(--coral); border-radius: 50%; display: block; height: 8px; left: 10px; position: absolute; top: 9px; width: 8px; }
 .preview-placeholder p { font-size: 12px; line-height: 1.5; margin: 0; }
 .preview-placeholder small { font-size: 10px; opacity: .72; }
-.local-video { height: 100%; object-fit: cover; position: absolute; width: 100%; z-index: 2; }
-.remote-video { height: 100%; object-fit: cover; position: absolute; width: 100%; z-index: 2; }
+.local-video { border: 2px solid rgba(255, 253, 249, .88); border-radius: 2px; bottom: 18px; box-shadow: 0 8px 22px rgba(17, 51, 43, .28); height: 92px; object-fit: cover; position: absolute; right: 18px; width: 132px; z-index: 4; }
+.local-video-label { background: rgba(17, 51, 43, .82); bottom: 26px; color: var(--white); font-family: 'DM Mono', monospace; font-size: 8px; letter-spacing: .04em; padding: 4px 6px; position: absolute; right: 26px; text-transform: uppercase; z-index: 5; }
+.remote-video { height: 100%; inset: 0; object-fit: cover; position: absolute; width: 100%; z-index: 2; }
 .video-overlay { align-items: center; background: linear-gradient(90deg, rgba(10, 25, 23, .35), transparent); color: white; display: flex; gap: 9px; inset: 0 0 auto; padding: 18px 21px; position: absolute; z-index: 3; }
 .video-overlay span { background: var(--coral); font-family: 'DM Mono', monospace; font-size: 8px; padding: 4px 6px; }
 .video-overlay b { font-size: 10px; font-weight: 600; }
@@ -255,6 +256,8 @@ input:checked + .switch::after { transform: translateX(19px); }
   .mode-row { align-items: flex-start; flex-direction: column; gap: 16px; }
   .right-column { grid-template-columns: 1fr; }
   .preview-stage { min-height: 290px; }
+  .local-video { bottom: 12px; height: 76px; right: 12px; width: 108px; }
+  .local-video-label { bottom: 18px; right: 18px; }
   .preview-topline { align-items: flex-start; flex-direction: column; }
   .preview-topline-actions { justify-content: space-between; width: 100%; }
   .segment { gap: 8px; padding: 12px 9px; }

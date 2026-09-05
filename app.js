@@ -51,6 +51,7 @@ const els = {
   previewStage: $('#preview-stage'),
   previewPlaceholder: $('#preview-placeholder'),
   localVideo: $('#local-video'),
+  localVideoLabel: $('#local-video-label'),
   remoteVideo: $('#remote-video'),
   remoteAudio: $('#remote-audio'),
   videoOverlay: $('#video-overlay'),
@@ -301,6 +302,7 @@ function releaseLocalMedia() {
   state.localStream = null;
   els.localVideo.srcObject = null;
   els.localVideo.classList.add('is-hidden');
+  els.localVideoLabel.classList.add('is-hidden');
   updateSessionControls();
 }
 
@@ -329,7 +331,7 @@ function showLocalVideo(track) {
   if (!track || !state.localStream) return;
   els.localVideo.srcObject = state.localStream;
   els.localVideo.classList.remove('is-hidden');
-  els.previewPlaceholder.classList.add('is-hidden');
+  els.localVideoLabel.classList.remove('is-hidden');
   els.localVideo.play().catch(() => {});
   track.addEventListener('ended', () => {
     if (!state.localStream?.getVideoTracks().includes(track)) return;
@@ -338,7 +340,8 @@ function showLocalVideo(track) {
     els.videoToggle.checked = false;
     els.localVideo.srcObject = null;
     els.localVideo.classList.add('is-hidden');
-    if (!els.remoteVideo.srcObject) els.previewPlaceholder.classList.remove('is-hidden');
+    els.localVideoLabel.classList.add('is-hidden');
+    updatePreviewPlaceholder();
     const transceiver = getVideoTransceiver();
     transceiver?.sender.replaceTrack(null).catch(() => {});
     setMessage('Kameran stängdes av. Kontrollera kamerabehörigheten och försök igen.', 'error');
@@ -349,7 +352,13 @@ function showLocalVideo(track) {
 function hideLocalVideo() {
   els.localVideo.srcObject = null;
   els.localVideo.classList.add('is-hidden');
-  if (!els.remoteVideo.srcObject) els.previewPlaceholder.classList.remove('is-hidden');
+  els.localVideoLabel.classList.add('is-hidden');
+  updatePreviewPlaceholder();
+}
+
+function updatePreviewPlaceholder() {
+  const remoteVideoVisible = !els.remoteVideo.classList.contains('is-hidden');
+  els.previewPlaceholder.classList.toggle('is-hidden', remoteVideoVisible);
 }
 
 function mediaErrorMessage(error) {
@@ -528,17 +537,17 @@ function setupPeerEvents(peer) {
       els.remoteVideo.srcObject = stream;
       els.remoteVideo.muted = true;
       els.remoteVideo.classList.remove('is-hidden');
-      els.previewPlaceholder.classList.add('is-hidden');
+      updatePreviewPlaceholder();
       els.videoOverlay.classList.remove('is-hidden');
       els.remoteVideo.play().catch(() => {});
       event.track.addEventListener('mute', () => {
         els.remoteVideo.classList.add('is-hidden');
         els.videoOverlay.classList.add('is-hidden');
-        if (!els.localVideo.srcObject) els.previewPlaceholder.classList.remove('is-hidden');
+        updatePreviewPlaceholder();
       });
       event.track.addEventListener('unmute', () => {
         els.remoteVideo.classList.remove('is-hidden');
-        els.previewPlaceholder.classList.add('is-hidden');
+        updatePreviewPlaceholder();
         els.videoOverlay.classList.remove('is-hidden');
         els.remoteVideo.play().catch(() => {});
       });
@@ -546,7 +555,6 @@ function setupPeerEvents(peer) {
       els.remoteAudio.srcObject = stream;
       els.remoteAudio.muted = state.remoteMuted;
       els.remoteAudio.play().catch(() => {});
-      els.previewPlaceholder.classList.add('is-hidden');
     }
     updateSessionControls();
   });
@@ -570,6 +578,7 @@ function disconnectSession(showMessage = true) {
   els.remoteVideo.muted = true;
   els.remoteVideo.classList.add('is-hidden');
   els.videoOverlay.classList.add('is-hidden');
+  els.localVideoLabel.classList.add('is-hidden');
   els.previewPlaceholder.classList.remove('is-hidden');
   els.inviteOutput.classList.add('is-hidden');
   els.remoteName.textContent = 'Väntar på en vän';
