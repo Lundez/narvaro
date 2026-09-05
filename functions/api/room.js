@@ -28,9 +28,13 @@ function getCode(value) {
 }
 
 function createCode() {
-  const values = new Uint32Array(4);
-  crypto.getRandomValues(values);
-  return Array.from(values, (value) => WORDS[value % WORDS.length]).join('-');
+  const chosen = new Set();
+  while (chosen.size < 4) {
+    const value = new Uint32Array(1);
+    crypto.getRandomValues(value);
+    chosen.add(WORDS[value[0] % WORDS.length]);
+  }
+  return Array.from(chosen).join('-');
 }
 
 function hasDescription(description) {
