@@ -1,6 +1,7 @@
 /*
  * Närvaro is intentionally serverless for media. The two short-lived SDP
- * blobs are exchanged manually, while audio/video itself travels over WebRTC.
+ * A short-lived Cloudflare Pages Function exchanges the SDP handshake. The
+ * audio/video stream itself travels directly between the two WebRTC peers.
  */
 const state = {
   role: 'parent',
@@ -17,6 +18,8 @@ const state = {
   levelTimer: null,
   offerReady: false,
   connected: false,
+  roomCode: null,
+  roomPollTimer: null,
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -24,6 +27,15 @@ const $$ = (selector) => Array.from(document.querySelectorAll(selector));
 
 const els = {
   createOffer: $('#create-offer'),
+  inviteOutput: $('#invite-output'),
+  inviteWords: $('#invite-words'),
+  inviteExpires: $('#invite-expires'),
+  inviteQr: $('#invite-qr'),
+  inviteLink: $('#invite-link'),
+  shareInvite: $('#share-invite'),
+  copyInviteLink: $('#copy-invite-link'),
+  inviteInput: $('#invite-input'),
+  joinInvite: $('#join-invite'),
   offerOutput: $('#offer-output'),
   offerCode: $('#offer-code'),
   incomingCode: $('#incoming-code'),
@@ -84,6 +96,175 @@ function decodeSignal(value) {
   const binary = atob(value.trim());
   const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
   return JSON.parse(new TextDecoder().decode(bytes));
+}
+
+function normalizeInviteCode(value) {
+  const input = String(value || '').trim();
+  if (!input) return '';
+  let candidate = input;
+  try {
+    if (/^https?:\/\//i.test(input)) {
+      candidate = new URL(input).searchParams.get('invite') || '';
+    }
+  } catch {
+    return '';
+  }
+  const words = candidate.toLowerCase().replace(/[^a-zåäö0-9\s-]/g, '').split(/[\s-]+/).filter(Boolean);
+  if (words.length !== 4 || words.some((word) => word.length < 2 || word.length > 24)) return '';
+  return words.join('-');
+}
+
+function getInviteLink(code = state.roomCode) {
+  if (!code) return '';
+  const url = new URL(window.location.href);
+  url.search = '';
+  url.hash = '';
+  url.searchParams.set('invite', code);
+  return url.toString();
+}
+
+async function copyText(text) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const helper = document.createElement('textarea');
+  helper.value = text;
+  helper.setAttribute('readonly', '');
+  helper.style.position = 'fixed';
+  helper.style.opacity = '0';
+  document.body.appendChild(helper);
+  helper.select();
+  document.execCommand('copy');
+  helper.remove();
+}
+
+function renderInvite(code, expiresAt) {
+  state.roomCode = code;
+  els.inviteWords.textContent = code.split('-').join(' · ');
+  els.inviteLink.value = getInviteLink(code);
+  if (expiresAt) {
+    els.inviteExpires.textContent = `Gäller till ${new Date(expiresAt).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })}`;
+  }
+  els.inviteOutput.classList.remove('is-hidden');
+  if (window.QRCode?.toCanvas) {
+    window.QRCode.toCanvas(els.inviteQr, els.inviteLink.value, {
+      width: 220,
+      margin: 1,
+      errorCorrectionLevel: 'M',
+      color: { dark: '#173d35', light: '#ffffff' },
+    }, () => {});
+  }
+}
+
+async function requestRoom(path, options = {}) {
+  const response = await fetch(path, {
+    ...options,
+    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+  });
+  let payload = {};
+  try { payload = await response.json(); } catch { /* The local static server may return an HTML 404. */ }
+  if (!response.ok) {
+    throw new Error(payload.error || `Signaling svarade med ${response.status}.`);
+  }
+  return payload;
+}
+
+async function createRoom(offer) {
+  return requestRoom('/api/room', {
+    method: 'POST',
+    body: JSON.stringify({
+      offer,
+      role: state.role,
+      mode: state.mode,
+      video: state.video,
+    }),
+  });
+}
+
+async function pollForAnswer(code) {
+  window.clearInterval(state.roomPollTimer);
+  const poll = async () => {
+    if (!state.peer || state.peer.connectionState === 'closed' || state.peer.currentRemoteDescription) return;
+    try {
+      const room = await requestRoom(`/api/room?code=${encodeURIComponent(code)}`);
+      if (room.answer) {
+        await state.peer.setRemoteDescription(room.answer);
+        window.clearInterval(state.roomPollTimer);
+        setMessage('Svar mottaget. Försöker koppla ihop enheterna…');
+      }
+    } catch (error) {
+      window.clearInterval(state.roomPollTimer);
+      setMessage(error.message || 'Kunde inte läsa invite-svaret.', 'error');
+    }
+  };
+  await poll();
+  if (state.peer && !state.peer.currentRemoteDescription) {
+    state.roomPollTimer = window.setInterval(poll, 1500);
+  }
+}
+
+async function joinRoom() {
+  const code = normalizeInviteCode(els.inviteInput.value);
+  if (!code) {
+    setMessage('Skriv in fyra invite-ord eller klistra in delningslänken.', 'error');
+    return;
+  }
+  try {
+    els.joinInvite.disabled = true;
+    setMessage('Läser invite och startar din enhet…');
+    const room = await requestRoom(`/api/room?code=${encodeURIComponent(code)}`);
+    if (!room.offer) throw new Error('Inviten saknar en aktiv anslutning. Skapa en ny invite.');
+    const stream = await ensureLocalMedia();
+    state.peer?.close();
+    state.peer = new RTCPeerConnection(rtcConfig);
+    setupPeerEvents(state.peer);
+    state.peer.addEventListener('datachannel', (event) => setupChannel(event.channel));
+    stream.getTracks().forEach((track) => state.peer.addTrack(track, stream));
+    await state.peer.setRemoteDescription(room.offer);
+    const answer = await state.peer.createAnswer();
+    await state.peer.setLocalDescription(answer);
+    await waitForIceComplete(state.peer);
+    await requestRoom(`/api/room?code=${encodeURIComponent(code)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ answer: state.peer.localDescription }),
+    });
+    state.roomCode = code;
+    setMessage('Svar skickat. Försöker koppla ihop enheterna…', 'success');
+    els.answerStepCopy.textContent = 'Svar skickat automatiskt. Väntar på direkt anslutning.';
+  } catch (error) {
+    setMessage(error.message || 'Kunde inte ansluta med invite-koden.', 'error');
+  } finally {
+    els.joinInvite.disabled = false;
+  }
+}
+
+async function shareInvite() {
+  if (!state.roomCode) return;
+  const url = getInviteLink();
+  try {
+    if (navigator.share) {
+      await navigator.share({ title: 'Närvaro invite', text: 'Öppna den här länken för att koppla upp Närvaro.', url });
+      setMessage('Invite-länken är delad.', 'success');
+    } else {
+      await copyText(url);
+      setMessage('Delningslänken är kopierad.', 'success');
+    }
+  } catch (error) {
+    if (error.name !== 'AbortError') setMessage('Kunde inte dela länken.', 'error');
+  }
+}
+
+async function copyInviteLink() {
+  if (!state.roomCode) return;
+  try {
+    await copyText(getInviteLink());
+    const original = els.copyInviteLink.innerHTML;
+    els.copyInviteLink.innerHTML = 'Kopierad ✓';
+    window.setTimeout(() => { els.copyInviteLink.innerHTML = original; }, 1400);
+  } catch {
+    setMessage('Kunde inte kopiera länken.', 'error');
+  }
 }
 
 function waitForIceComplete(peer) {
@@ -258,7 +439,16 @@ async function createOffer() {
     els.offerOutput.classList.remove('is-hidden');
     state.offerReady = true;
     els.createOffer.textContent = 'Ny inbjudan ↗';
-    setMessage('Koden är klar. Skicka den till enhet B.', 'success');
+    try {
+      const room = await createRoom(state.peer.localDescription);
+      renderInvite(room.code, room.expiresAt);
+      await pollForAnswer(room.code);
+      setMessage('Din invite är klar. Dela länken eller QR-koden med enhet B.', 'success');
+    } catch (error) {
+      // Keep the manual SDP fallback useful when the Pages Function/KV binding
+      // has not been deployed yet.
+      setMessage(`Kort invite kunde inte skapas ännu: ${error.message} Använd den avancerade manuella koden tills Cloudflare är klar.`, 'error');
+    }
   } catch (error) {
     setMessage(error.message || 'Kunde inte skapa en inbjudan.', 'error');
   } finally {
@@ -274,6 +464,11 @@ async function processIncomingCode() {
   }
   try {
     els.processCode.disabled = true;
+    if (normalizeInviteCode(raw)) {
+      els.inviteInput.value = raw;
+      await joinRoom();
+      return;
+    }
     const signal = decodeSignal(raw);
     if (signal.type === 'offer') {
       setMessage('Inbjudan läst. Startar din enhet…');
@@ -348,6 +543,12 @@ async function copyTarget(event) {
 
 els.createOffer.addEventListener('click', createOffer);
 els.processCode.addEventListener('click', processIncomingCode);
+els.joinInvite.addEventListener('click', joinRoom);
+els.shareInvite.addEventListener('click', shareInvite);
+els.copyInviteLink.addEventListener('click', copyInviteLink);
+els.inviteInput.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') joinRoom();
+});
 els.videoToggle.addEventListener('change', (event) => changeVideo(event.target.checked));
 els.thresholdToggle.addEventListener('change', (event) => {
   state.thresholdEnabled = event.target.checked;
@@ -364,7 +565,13 @@ els.fullscreenButton.addEventListener('click', () => {
 });
 $$('.segment').forEach((button) => button.addEventListener('click', () => changeRole(button.dataset.role)));
 $$('.mode-button').forEach((button) => button.addEventListener('click', () => changeMode(button.dataset.mode)));
-$$('.copy-button').forEach((button) => button.addEventListener('click', copyTarget));
+$$('.copy-button[data-copy-target]').forEach((button) => button.addEventListener('click', copyTarget));
+
+const inviteFromUrl = new URL(window.location.href).searchParams.get('invite');
+if (inviteFromUrl && normalizeInviteCode(inviteFromUrl)) {
+  els.inviteInput.value = inviteFromUrl;
+  setMessage('Invite-länk hittad. Tryck på Anslut med invite när du vill starta.', 'success');
+}
 
 updateThresholdUI();
 setConnectionStatus('Inte ansluten');

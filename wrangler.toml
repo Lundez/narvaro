@@ -1,0 +1,7 @@
+name = "narvaro"
+pages_build_output_dir = "."
+compatibility_date = "2026-09-05"
+
+[[kv_namespaces]]
+binding = "ROOMS"
+id = "6799e98120734487a1aba0d67e2603ab"
