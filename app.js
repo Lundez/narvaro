@@ -225,8 +225,8 @@ async function joinRoom() {
     state.peer = new RTCPeerConnection(rtcConfig);
     setupPeerEvents(state.peer);
     state.peer.addEventListener('datachannel', (event) => setupChannel(event.channel));
-    stream.getTracks().forEach((track) => state.peer.addTrack(track, stream));
     await state.peer.setRemoteDescription(room.offer);
+    await attachLocalTracks(state.peer, stream);
     const answer = await state.peer.createAnswer();
     await state.peer.setLocalDescription(answer);
     await waitForIceComplete(state.peer);
@@ -325,6 +325,22 @@ function mediaErrorMessage(error) {
   if (error?.name === 'NotFoundError') return 'Ingen mikrofon eller kamera hittades på enheten.';
   if (error?.name === 'NotReadableError') return 'Mikrofonen eller kameran används redan av en annan app.';
   return error?.message || 'Kunde inte starta mikrofon eller kamera.';
+}
+
+async function attachLocalTracks(peer, stream, includeVideoSlot = false) {
+  stream.getAudioTracks().forEach((track) => peer.addTrack(track, stream));
+  let videoTransceiver = peer.getTransceivers().find((transceiver) => transceiver.receiver.track.kind === 'video');
+  if (includeVideoSlot && !videoTransceiver) {
+    // Always negotiate a video slot in the offer. This lets the answerer send
+    // video even when the offerer has its own camera turned off.
+    videoTransceiver = peer.addTransceiver('video', { direction: 'sendrecv' });
+  }
+  const videoTrack = stream.getVideoTracks()[0];
+  if (videoTrack && videoTransceiver) {
+    await videoTransceiver.sender.replaceTrack(videoTrack);
+  } else if (videoTrack) {
+    peer.addTrack(videoTrack, stream);
+  }
 }
 
 async function ensureLocalMedia() {
@@ -521,7 +537,7 @@ async function createOffer() {
     state.peer?.close();
     state.peer = new RTCPeerConnection(rtcConfig);
     setupPeerEvents(state.peer);
-    stream.getTracks().forEach((track) => state.peer.addTrack(track, stream));
+    await attachLocalTracks(state.peer, stream, true);
     setupChannel(state.peer.createDataChannel('control'));
     const offer = await state.peer.createOffer();
     await state.peer.setLocalDescription(offer);
@@ -568,8 +584,8 @@ async function processIncomingCode() {
       state.peer = new RTCPeerConnection(rtcConfig);
       setupPeerEvents(state.peer);
       state.peer.addEventListener('datachannel', (event) => setupChannel(event.channel));
-      stream.getTracks().forEach((track) => state.peer.addTrack(track, stream));
       await state.peer.setRemoteDescription(signal);
+      await attachLocalTracks(state.peer, stream);
       const answer = await state.peer.createAnswer();
       await state.peer.setLocalDescription(answer);
       await waitForIceComplete(state.peer);
