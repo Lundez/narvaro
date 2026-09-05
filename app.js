@@ -12,6 +12,7 @@ const state = {
   peer: null,
   channel: null,
   localStream: null,
+  meterStream: null,
   audioContext: null,
   analyser: null,
   levelData: null,
@@ -22,6 +23,7 @@ const state = {
   roomPollTimer: null,
   localMuted: false,
   remoteMuted: false,
+  remoteAudioNeedsUnlock: false,
   battery: null,
   batteryTimer: null,
   batterySend: null,
@@ -243,6 +245,7 @@ async function joinRoom() {
     return;
   }
   try {
+    primeAudioContext();
     els.joinInvite.disabled = true;
     setMessage('Läser invite och startar din enhet…');
     const room = await requestRoom(`/api/room?code=${encodeURIComponent(code)}`);
@@ -323,6 +326,8 @@ function releaseLocalMedia() {
   state.levelData = null;
   if (state.audioContext) state.audioContext.close().catch(() => {});
   state.audioContext = null;
+  state.meterStream?.getTracks().forEach((track) => track.stop());
+  state.meterStream = null;
   state.localStream?.getTracks().forEach((track) => track.stop());
   state.localStream = null;
   els.localVideo.srcObject = null;
@@ -336,6 +341,13 @@ function applyLocalAudioState(level = getCurrentLevel()) {
   if (!track) return;
   const thresholdAllowsAudio = state.role !== 'child' || !state.thresholdEnabled || level >= state.threshold;
   track.enabled = !state.localMuted && thresholdAllowsAudio;
+}
+
+function primeAudioContext() {
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextClass) return;
+  if (!state.audioContext) state.audioContext = new AudioContextClass();
+  if (state.audioContext.state === 'suspended') state.audioContext.resume().catch(() => {});
 }
 
 function updateSessionControls() {
@@ -363,6 +375,10 @@ function updateRemoteBattery(message = state.remoteBattery) {
     els.remoteBattery.textContent = 'Batteri ej tillgängligt';
     return;
   }
+  if (message.known === false) {
+    els.remoteBattery.textContent = 'Batteri okänt';
+    return;
+  }
   const level = Math.round(Math.max(0, Math.min(1, Number(message.level))) * 100);
   els.remoteBattery.textContent = `Batteri ${level}%${message.charging ? ' · laddar' : ''}`;
 }
@@ -387,17 +403,24 @@ async function startBatteryMonitoring(channel) {
   try {
     const battery = await navigator.getBattery();
     if (state.channel !== channel) return;
-    const send = () => sendControl({
-      type: 'battery',
-      available: true,
-      level: battery.level,
-      charging: battery.charging,
-    });
+    const send = () => {
+      const level = Number(battery.level);
+      const charging = battery.charging === true;
+      // The Battery Status API uses this exact tuple when the browser cannot
+      // report the real battery state, so do not present it as a fact.
+      const known = !(level === 1 && charging && battery.chargingTime === 0 && !Number.isFinite(battery.dischargingTime));
+      sendControl({ type: 'battery', available: true, known, level, charging });
+    };
     state.battery = battery;
     state.batterySend = send;
     const levelHandler = () => send();
     const chargingHandler = () => send();
-    state.batteryListeners = [['levelchange', levelHandler], ['chargingchange', chargingHandler]];
+    state.batteryListeners = [
+      ['levelchange', levelHandler],
+      ['chargingchange', chargingHandler],
+      ['chargingtimechange', chargingHandler],
+      ['dischargingtimechange', chargingHandler],
+    ];
     state.batteryListeners.forEach(([eventName, handler]) => battery.addEventListener(eventName, handler));
     state.batteryTimer = window.setInterval(send, 60000);
     send();
@@ -490,6 +513,7 @@ async function ensureLocalMedia() {
   if (!navigator.mediaDevices?.getUserMedia) {
     throw new Error('Den här webbläsaren kan inte använda mikrofon eller kamera.');
   }
+  primeAudioContext();
   state.localStream = await navigator.mediaDevices.getUserMedia({
     audio: true,
     video: state.video ? { width: { ideal: 960 }, height: { ideal: 540 }, facingMode: 'user' } : false,
@@ -506,9 +530,14 @@ async function ensureLocalMedia() {
 }
 
 function setupAnalyser() {
-  if (!state.localStream?.getAudioTracks().length || state.audioContext) return;
-  state.audioContext = new (window.AudioContext || window.webkitAudioContext)();
-  const source = state.audioContext.createMediaStreamSource(state.localStream);
+  if (!state.localStream?.getAudioTracks().length || state.analyser) return;
+  primeAudioContext();
+  if (!state.audioContext) return;
+  // Analyse a clone. Disabling the outgoing track for the threshold filter
+  // must not also silence the analyser, or the filter can never reopen.
+  const meterTrack = state.localStream.getAudioTracks()[0].clone();
+  state.meterStream = new MediaStream([meterTrack]);
+  const source = state.audioContext.createMediaStreamSource(state.meterStream);
   state.analyser = state.audioContext.createAnalyser();
   state.analyser.fftSize = 256;
   state.levelData = new Uint8Array(state.analyser.fftSize);
@@ -573,6 +602,23 @@ function sendRoleAndSettings() {
   }
 }
 
+function playRemoteAudio() {
+  if (!els.remoteAudio.srcObject) return;
+  els.remoteAudio.play().then(() => {
+    state.remoteAudioNeedsUnlock = false;
+  }).catch(() => {
+    if (!state.remoteAudioNeedsUnlock) {
+      state.remoteAudioNeedsUnlock = true;
+      setMessage('Tryck en gång på sidan för att aktivera mottagningsljudet.', 'error');
+    }
+  });
+}
+
+function unlockAudioFromGesture() {
+  if (state.audioContext?.state === 'suspended') state.audioContext.resume().catch(() => {});
+  if (state.remoteAudioNeedsUnlock) playRemoteAudio();
+}
+
 function handleControlMessage(message) {
   if (message.type === 'hello') {
     els.remoteName.textContent = message.role === 'parent' ? 'Parent-enhet' : 'Child-enhet';
@@ -586,6 +632,7 @@ function handleControlMessage(message) {
     state.threshold = Number(message.threshold ?? state.threshold);
     els.thresholdSlider.value = state.threshold;
     updateThresholdUI();
+    applyLocalAudioState();
   }
   if (message.type === 'battery') updateRemoteBattery(message);
 }
@@ -640,7 +687,7 @@ function setupPeerEvents(peer) {
     } else {
       els.remoteAudio.srcObject = stream;
       els.remoteAudio.muted = state.remoteMuted;
-      els.remoteAudio.play().catch(() => {});
+      playRemoteAudio();
     }
     updateSessionControls();
   });
@@ -657,6 +704,7 @@ function disconnectSession(showMessage = true) {
   state.roomCode = null;
   state.localMuted = false;
   state.remoteMuted = false;
+  state.remoteAudioNeedsUnlock = false;
   stopBatteryMonitoring();
   updateRemoteBattery(null);
   releaseLocalMedia();
@@ -693,6 +741,7 @@ function toggleRemoteMute() {
 
 async function createOffer() {
   try {
+    primeAudioContext();
     els.createOffer.disabled = true;
     if (state.peer || state.localStream || state.roomCode) disconnectSession(false);
     setMessage('Förbereder mikrofon och skapar en säker inbjudan…');
@@ -733,6 +782,7 @@ async function processIncomingCode() {
     return;
   }
   try {
+    primeAudioContext();
     els.processCode.disabled = true;
     if (normalizeInviteCode(raw)) {
       els.inviteInput.value = raw;
@@ -878,6 +928,7 @@ els.inviteInput.addEventListener('keydown', (event) => {
   if (event.key === 'Enter') joinRoom();
 });
 els.videoToggle.addEventListener('change', (event) => changeVideo(event.target.checked));
+document.addEventListener('pointerdown', unlockAudioFromGesture, { passive: true });
 els.thresholdToggle.addEventListener('change', (event) => {
   state.thresholdEnabled = event.target.checked;
   updateThresholdUI();
