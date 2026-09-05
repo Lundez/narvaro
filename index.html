@@ -32,13 +32,13 @@
           <article class="card connection-card">
             <div class="card-heading">
               <div>
-                <p class="section-kicker">01 · Din enhet</p>
+                <p class="section-kicker">01 · Aktiv roll</p>
                 <h2>Ställ in din plats</h2>
               </div>
               <span class="step-badge">A</span>
             </div>
 
-            <div class="segmented role-switch" role="group" aria-label="Välj enhetsroll">
+              <div class="segmented role-switch" role="group" aria-label="Välj aktiv roll">
               <button class="segment is-active" data-role="parent" type="button">
                 <span class="segment-icon">⌂</span>
                 <span><strong>Parent</strong><small>Jag lyssnar</small></span>
@@ -46,8 +46,9 @@
               <button class="segment" data-role="child" type="button">
                 <span class="segment-icon">◌</span>
                 <span><strong>Child</strong><small>Jag är nära</small></span>
-              </button>
-            </div>
+                </button>
+              </div>
+              <p class="role-help">Aktiv roll · kan ändras även under sessionen</p>
 
             <div class="mode-row">
               <div>
@@ -89,6 +90,7 @@
                     </div>
                     <div class="qr-wrap">
                       <canvas id="invite-qr" width="220" height="220" aria-label="QR-kod för inbjudan"></canvas>
+                      <div id="qr-status" class="qr-status is-hidden" role="status" aria-live="polite"><span class="qr-spinner" aria-hidden="true"></span><span>Genererar QR-kod…</span></div>
                       <p>Skanna med den andra enheten</p>
                     </div>
                     <label class="invite-link-label" for="invite-link">Delningslänk</label>
@@ -145,6 +147,7 @@
                   <input id="video-toggle" type="checkbox" />
                   <span class="switch" aria-hidden="true"></span>
                 </label>
+                <span id="active-role-badge" class="role-session-badge" aria-live="polite">Parent aktiv</span>
                 <span class="privacy-mini">P2P</span>
               </div>
             </div>
@@ -163,7 +166,10 @@
             <div class="preview-footer">
               <div>
                 <p class="preview-name" id="remote-name">Väntar på en vän</p>
-                <p class="preview-status" id="preview-status">Koppla ihop två enheter för att börja</p>
+                <div class="preview-status-row">
+                  <p class="preview-status" id="preview-status">Koppla ihop två enheter för att börja</p>
+                  <span id="remote-battery" class="battery-status" aria-live="polite">Batteri —</span>
+                </div>
               </div>
               <div class="preview-actions">
                 <button id="mute-local-button" class="session-button" type="button" aria-pressed="false" disabled>Muta mikrofon</button>
@@ -214,6 +220,6 @@
     </main>
 
     <script src="vendor/qrcode.min.js"></script>
-    <script src="app.js?v=20260905-4"></script>
+    <script src="app.js?v=20260905-5"></script>
   </body>
 </html>

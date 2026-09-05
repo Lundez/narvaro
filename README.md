@@ -21,6 +21,8 @@ python3 -m http.server 4173
 
 Välj video på den enhet som ska skicka bild. Fjärrbilden visas som huvudbild i **Din vy**, medan den egna kameran visas som en liten märkt bild i hörnet. Kameran startar direkt så att den går att kontrollera innan anslutning. Båda enheterna behöver alltså inte slå på Video; handshaken reserverar videokanalen automatiskt. Video kan även slås av och på under en aktiv session utan att ljudet bryts. Under förhandsvisningen kan du när som helst muta din egen mikrofon, tysta mottagningsljudet eller avsluta sessionen.
 
+`Parent` och `Child` är aktiva roller, inte permanenta enhetstyper. Rollväljaren kan ändras under sessionen och påverkar bland annat ljudtröskelns kontroll. Batterinivån för motpartens enhet visas när webbläsaren tillåter batteri-API:t; i webbläsare utan stöd visas en tydlig fallback.
+
 Invite-koden pekar på en tillfällig signaling-post som raderas efter 15 minuter. Den innehåller bara WebRTC-handshaken; ljud och video transporteras fortfarande direkt mellan enheterna. Under **Avancerat** finns den tidigare manuella SDP-växlingen kvar som reserv.
 
 Media går peer-to-peer med WebRTC. STUN används för att upptäcka en direkt nätväg, men ingen ljud- eller videodata skickas via en applikationsserver. I nätverk med strikt NAT/brandvägg kan en TURN-reläserver behövas för att anslutningen ska fungera.

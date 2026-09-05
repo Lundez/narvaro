@@ -22,6 +22,12 @@ const state = {
   roomPollTimer: null,
   localMuted: false,
   remoteMuted: false,
+  battery: null,
+  batteryTimer: null,
+  batterySend: null,
+  batteryListeners: [],
+  remoteBattery: null,
+  qrRenderToken: 0,
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -33,6 +39,7 @@ const els = {
   inviteWords: $('#invite-words'),
   inviteExpires: $('#invite-expires'),
   inviteQr: $('#invite-qr'),
+  qrStatus: $('#qr-status'),
   inviteLink: $('#invite-link'),
   shareInvite: $('#share-invite'),
   copyInviteLink: $('#copy-invite-link'),
@@ -46,6 +53,7 @@ const els = {
   answerCode: $('#answer-code'),
   connectionMessage: $('#connection-message'),
   connectionLabel: $('#connection-label'),
+  activeRoleBadge: $('#active-role-badge'),
   remoteName: $('#remote-name'),
   previewStatus: $('#preview-status'),
   previewStage: $('#preview-stage'),
@@ -54,6 +62,7 @@ const els = {
   localVideoLabel: $('#local-video-label'),
   remoteVideo: $('#remote-video'),
   remoteAudio: $('#remote-audio'),
+  remoteBattery: $('#remote-battery'),
   videoOverlay: $('#video-overlay'),
   muteLocalButton: $('#mute-local-button'),
   muteRemoteButton: $('#mute-remote-button'),
@@ -154,14 +163,30 @@ function renderInvite(code, expiresAt) {
     els.inviteExpires.textContent = `Gäller till ${new Date(expiresAt).toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })}`;
   }
   els.inviteOutput.classList.remove('is-hidden');
-  if (window.QRCode?.toCanvas) {
-    window.QRCode.toCanvas(els.inviteQr, els.inviteLink.value, {
-      width: 220,
-      margin: 1,
-      errorCorrectionLevel: 'M',
-      color: { dark: '#173d35', light: '#ffffff' },
-    }, () => {});
-  }
+  const renderToken = ++state.qrRenderToken;
+  els.inviteQr.classList.add('is-hidden');
+  els.qrStatus.classList.remove('is-hidden');
+  window.setTimeout(() => {
+    if (renderToken !== state.qrRenderToken) return;
+    if (!window.QRCode?.toCanvas) {
+      els.qrStatus.querySelector('span:last-child').textContent = 'QR-kod kunde inte laddas.';
+      return;
+    }
+    try {
+      window.QRCode.toCanvas(els.inviteQr, els.inviteLink.value, {
+        width: 220,
+        margin: 1,
+        errorCorrectionLevel: 'M',
+        color: { dark: '#173d35', light: '#ffffff' },
+      }, () => {
+        if (renderToken !== state.qrRenderToken) return;
+        els.qrStatus.classList.add('is-hidden');
+        els.inviteQr.classList.remove('is-hidden');
+      });
+    } catch {
+      els.qrStatus.querySelector('span:last-child').textContent = 'QR-kod kunde inte skapas.';
+    }
+  }, 0);
 }
 
 async function requestRoom(path, options = {}) {
@@ -321,6 +346,64 @@ function updateSessionControls() {
   els.muteLocalButton.setAttribute('aria-pressed', String(state.localMuted));
   els.muteRemoteButton.textContent = state.remoteMuted ? 'Sätt på ljud' : 'Tysta ljud';
   els.muteRemoteButton.setAttribute('aria-pressed', String(state.remoteMuted));
+}
+
+function updateRoleUI() {
+  const roleLabel = state.role === 'parent' ? 'Parent' : 'Child';
+  els.activeRoleBadge.textContent = `${roleLabel} aktiv`;
+}
+
+function updateRemoteBattery(message = state.remoteBattery) {
+  state.remoteBattery = message;
+  if (!message) {
+    els.remoteBattery.textContent = 'Batteri —';
+    return;
+  }
+  if (!message.available) {
+    els.remoteBattery.textContent = 'Batteri ej tillgängligt';
+    return;
+  }
+  const level = Math.round(Math.max(0, Math.min(1, Number(message.level))) * 100);
+  els.remoteBattery.textContent = `Batteri ${level}%${message.charging ? ' · laddar' : ''}`;
+}
+
+function stopBatteryMonitoring() {
+  if (state.battery) {
+    state.batteryListeners.forEach(([eventName, handler]) => state.battery.removeEventListener(eventName, handler));
+  }
+  if (state.batteryTimer) window.clearInterval(state.batteryTimer);
+  state.battery = null;
+  state.batteryTimer = null;
+  state.batterySend = null;
+  state.batteryListeners = [];
+}
+
+async function startBatteryMonitoring(channel) {
+  stopBatteryMonitoring();
+  if (!navigator.getBattery) {
+    sendControl({ type: 'battery', available: false });
+    return;
+  }
+  try {
+    const battery = await navigator.getBattery();
+    if (state.channel !== channel) return;
+    const send = () => sendControl({
+      type: 'battery',
+      available: true,
+      level: battery.level,
+      charging: battery.charging,
+    });
+    state.battery = battery;
+    state.batterySend = send;
+    const levelHandler = () => send();
+    const chargingHandler = () => send();
+    state.batteryListeners = [['levelchange', levelHandler], ['chargingchange', chargingHandler]];
+    state.batteryListeners.forEach(([eventName, handler]) => battery.addEventListener(eventName, handler));
+    state.batteryTimer = window.setInterval(send, 60000);
+    send();
+  } catch {
+    sendControl({ type: 'battery', available: false });
+  }
 }
 
 function getVideoTransceiver(peer = state.peer) {
@@ -504,14 +587,17 @@ function handleControlMessage(message) {
     els.thresholdSlider.value = state.threshold;
     updateThresholdUI();
   }
+  if (message.type === 'battery') updateRemoteBattery(message);
 }
 
 function setupChannel(channel) {
   state.channel = channel;
   channel.addEventListener('open', () => {
     sendRoleAndSettings();
+    startBatteryMonitoring(channel);
     setMessage('Anslutningen är krypterad och direkt.', 'success');
   });
+  channel.addEventListener('close', stopBatteryMonitoring);
   channel.addEventListener('message', (event) => {
     try { handleControlMessage(JSON.parse(event.data)); } catch { /* Ignore malformed control messages. */ }
   });
@@ -571,6 +657,8 @@ function disconnectSession(showMessage = true) {
   state.roomCode = null;
   state.localMuted = false;
   state.remoteMuted = false;
+  stopBatteryMonitoring();
+  updateRemoteBattery(null);
   releaseLocalMedia();
   els.remoteAudio.srcObject = null;
   els.remoteAudio.muted = false;
@@ -687,7 +775,12 @@ function changeRole(role) {
   state.role = role;
   $$('.segment').forEach((button) => button.classList.toggle('is-active', button.dataset.role === role));
   updateThresholdUI();
-  if (state.connected) sendRoleAndSettings();
+  updateRoleUI();
+  applyLocalAudioState();
+  if (state.connected) {
+    sendRoleAndSettings();
+    setMessage(`${role === 'parent' ? 'Parent' : 'Child'} är nu aktiv roll.`, 'success');
+  }
 }
 
 function changeMode(mode) {
@@ -809,5 +902,7 @@ if (inviteFromUrl && normalizeInviteCode(inviteFromUrl)) {
 }
 
 updateThresholdUI();
+updateRoleUI();
+updateRemoteBattery();
 setConnectionStatus('Inte ansluten');
 updateSessionControls();
